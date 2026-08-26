@@ -35,7 +35,7 @@ const waifuCommand: BotCommand = {
       await context.reply(caption, image.url);
     } catch (error: any) {
       console.error("[WAIFU] Error:", error.message || error);
-      await context.reply(`❌ Erreur lors de la récupération de l'image. Réessaie.\n\nTags disponibles: ${VALID_TAGS.join(", ")}`);
+      await context.reply(`❌ Error fetching image. Please try again.\n\nAvailable tags: ${VALID_TAGS.join(", ")}`);
     }
   }
 };

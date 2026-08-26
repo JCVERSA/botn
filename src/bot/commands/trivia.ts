@@ -98,7 +98,7 @@ const triviaCommand: BotCommand = {
       );
     } catch (error: any) {
       console.error("[TRIVIA] Error:", error.message || error);
-      await context.reply("❌ Erreur lors de la récupération du quiz. Réessaie.");
+      await context.reply("❌ Error fetching the quiz. Please try again.");
     }
   }
 };

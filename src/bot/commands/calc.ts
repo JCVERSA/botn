@@ -25,6 +25,10 @@ const calcCommand: BotCommand = {
       const computeResult = new Function(`return (${expression})`);
       const result = computeResult();
 
+      if (typeof result !== "number" || !Number.isFinite(result)) {
+        return context.reply("❌ The expression does not produce a finite number (e.g. division by zero).");
+      }
+
       let text = `🧮 *Nebula Calculator*\n\n`;
       text += `📝 *Expression:* \`${expression}\`\n`;
       text += `✅ *Result:* \`${result}\``;

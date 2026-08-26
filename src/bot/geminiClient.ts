@@ -22,7 +22,8 @@ export function getAIClient(): GoogleGenAI | null {
 }
 
 /**
- * Robust wrapper for text generation with retry mechanism and model fallbacks
+ * Robust wrapper for text generation with retry mechanism and model fallbacks.
+ * Throws when every model failed, so callers can render a truthful error.
  */
 export async function generateTextWithFallback(
   prompt: string | any[],
@@ -36,7 +37,7 @@ export async function generateTextWithFallback(
 
   // List of models to try in sequence if a transient error (503/429) occurs
   const modelCandidates = [preferredModel, "gemini-3.5-flash", "gemini-3.1-flash-lite"];
-  
+
   // Dedup models to keep preferred first
   const modelsToTry = Array.from(new Set(modelCandidates));
 
@@ -59,10 +60,10 @@ export async function generateTextWithFallback(
       } catch (err: any) {
         lastError = err;
         const errMessage = err?.message || String(err);
-        const isTransient = errMessage.includes("503") || 
-                            errMessage.includes("UNAVAILABLE") || 
-                            errMessage.includes("429") || 
-                            errMessage.includes("quota") || 
+        const isTransient = errMessage.includes("503") ||
+                            errMessage.includes("UNAVAILABLE") ||
+                            errMessage.includes("429") ||
+                            errMessage.includes("quota") ||
                             errMessage.includes("RESOURCE_EXHAUSTED") ||
                             errMessage.includes("high demand");
 
@@ -79,10 +80,9 @@ export async function generateTextWithFallback(
     }
   }
 
-  // If we reach here, all Gemini models failed.
-  // Instead of crashing, let's provide a smart friendly response with the error details.
+  // All models failed — surface a truthful error instead of a canned message.
   const errMsg = lastError?.message || String(lastError);
-  return `⚠️ *Nebula Service Advisory*\n\nGemini API services are currently experiencing extremely high traffic or rate limits.\nDetails: _${errMsg}_\n\n_Please try your command again in a few moments._`;
+  throw new Error(`Gemini API is currently unavailable: ${errMsg}`);
 }
 
 /**
@@ -93,16 +93,16 @@ export async function generateImageWithFallback(
   inputImageBase64?: string
 ): Promise<{ imageUrl: string; mode: "generated" | "edited" | "fallback" }> {
   const ai = getAIClient();
-  
+
   if (ai) {
     // Try Gemini image generation first
     const imageModels = ["gemini-3.1-flash-image", "imagen-3.0-generate-002"];
-    
+
     for (const model of imageModels) {
       try {
         console.log(`🎨 Attempting Gemini Image Generation with [${model}]...`);
         let response;
-        
+
         if (inputImageBase64) {
           // Image editing mode
           response = await ai.models.generateContent({
@@ -167,7 +167,7 @@ export async function generateImageWithFallback(
   console.log("🌟 Gemini Image Service rate-limited or unavailable. Activating Pollinations AI high-fidelity fallback...");
   const encodedPrompt = encodeURIComponent(prompt);
   const fallbackUrl = `https://image.pollinations.ai/prompt/${encodedPrompt}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 100000)}`;
-  
+
   return {
     imageUrl: fallbackUrl,
     mode: "fallback"

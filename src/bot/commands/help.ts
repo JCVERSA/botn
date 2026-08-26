@@ -24,7 +24,7 @@ const helpCommand: BotCommand = {
       helpText += `• All command names can be called with or without uppercase.\n`;
       helpText += `• Group administrators have exclusive access to *Admin* features.\n`;
       helpText += `• Use \`${config.prefix}menu\` to list all categories at once.\n\n`;
-      helpText += `🌌 _Nebula Engine v1.0.4 - Active and Secure_`;
+      helpText += `🌌 _Nebula Engine v1.1.0 - Active and Secure_`;
       
       return context.reply(helpText);
     }

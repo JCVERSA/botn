@@ -1,8 +1,7 @@
 import makeWASocket, {
   DisconnectReason,
   useMultiFileAuthState,
-  fetchLatestBaileysVersion,
-  delay
+  fetchLatestBaileysVersion
 } from "@whiskeysockets/baileys";
 import pino from "pino";
 import { Boom } from "@hapi/boom";
@@ -73,10 +72,53 @@ export function clearLogs() {
   botState.logs = ["🤖 Logs cleared."];
 }
 
+/** Decodes a data: URI into a Buffer (used for AI-generated images). */
+function bufferFromDataUri(dataUri: string): Buffer | null {
+  const match = /^data:([^;,]+)?(;base64)?,(.*)$/s.exec(dataUri);
+  if (!match) return null;
+  try {
+    return Buffer.from(match[3], "base64");
+  } catch {
+    return null;
+  }
+}
+
+/** Minimal mock socket so simulator runs of sock-dependent commands don't crash. */
+function createMockSocket(capture: {
+  replyText: () => string;
+  setReply: (text: string) => void;
+  setImageUrl: (url: string) => void;
+  setEmoji: (emoji: string) => void;
+}) {
+  return {
+    sendMessage: async (_jid: string, content: any) => {
+      if (content?.text !== undefined) {
+        capture.setReply(String(content.text));
+      }
+      if (content?.image !== undefined) {
+        const url = typeof content.image === "string" ? content.image : content.image?.url;
+        if (url) capture.setImageUrl(String(url));
+      }
+      if (content?.video !== undefined) {
+        const url = typeof content.video === "string" ? content.video : content.video?.url;
+        if (url) capture.setImageUrl(String(url));
+      }
+      if (content?.react !== undefined) {
+        capture.setEmoji(String(content.react.text ?? content.react));
+      }
+      return {};
+    },
+    groupMetadata: async () => ({ participants: [], subject: "Nebula Simulator Group" }),
+    user: { id: "1234567890:1" },
+    ev: { on: () => {} },
+    downloadContentFromMessage: async () => [],
+  };
+}
+
 // Simulated execution for the web play-zone
 export async function simulateMessage(senderName: string, text: string): Promise<{ text: string; imageUrl?: string; emoji?: string }> {
   addLog(`[Simulator] Message from ${senderName}: "${text}"`);
-  
+
   const config = getConfig();
   const prefix = config.prefix;
 
@@ -86,7 +128,7 @@ export async function simulateMessage(senderName: string, text: string): Promise
       emoji: "🎵"
     };
   }
-  
+
   // Check if starts with prefix
   if (!text.startsWith(prefix)) {
     return { text: `🤖 Hello! I am ${config.botName}. Type \`${prefix}menu\` to see what I can do!` };
@@ -96,7 +138,7 @@ export async function simulateMessage(senderName: string, text: string): Promise
   const body = text.slice(prefix.length).trim();
   const args = body.split(/\s+/);
   const commandName = args.shift()?.toLowerCase() || "";
-  
+
   const command = getCommand(commandName);
   if (!command) {
     return { text: `❌ *Error:* Command \`${prefix}${commandName}\` not found. Type \`${prefix}menu\` for a list of commands.` };
@@ -106,11 +148,26 @@ export async function simulateMessage(senderName: string, text: string): Promise
   let replyImageUrl: string | undefined = undefined;
   let reactionEmoji: string | undefined = undefined;
 
+  // Mock sock + msg so commands that send directly (roast, hidetag, download) work too.
+  const mockSock = createMockSocket({
+    replyText: () => replyText,
+    setReply: (t) => { replyText = t; },
+    setImageUrl: (u) => { replyImageUrl = u; },
+    setEmoji: (e) => { reactionEmoji = e; },
+  });
+
+  const mockMsg = {
+    key: { remoteJid: "1234567890@g.us", fromMe: false, id: "SIMULATED", participant: "1234567890@s.whatsapp.net" },
+    message: { extendedTextMessage: { text, contextInfo: { mentionedJid: [] } } },
+    pushName: senderName,
+  };
+
   // Mock context
   const mockContext: BotCommandContext = {
-    sender: "1234567890@s.whatsapp.net",
+    sender: "1234567890@g.us", // Group jid so group-only commands are testable
     senderName,
     isOwner: true, // Simulator user is simulated as owner to test all commands
+    isAdmin: true, // ...and as group admin to test admin commands
     prefix,
     commandName,
     args,
@@ -134,7 +191,7 @@ export async function simulateMessage(senderName: string, text: string): Promise
 
   try {
     incrementCommandStats(commandName);
-    await command.execute(null, null, mockContext);
+    await command.execute(mockSock, mockMsg, mockContext);
     return { text: replyText, imageUrl: replyImageUrl, emoji: reactionEmoji };
   } catch (error: any) {
     addLog(`[Simulator Error] Failed to execute ${commandName}: ${error.message}`);
@@ -143,7 +200,7 @@ export async function simulateMessage(senderName: string, text: string): Promise
 }
 
 // Live Baileys startup
-export async function startLiveBot() {
+export async function startLiveBot(isManualStart = false) {
   if (botState.status === "connected" || botState.status === "connecting" || botState.status === "qr_ready") {
     addLog("⚠️ Bot is already running, connecting, or waiting for QR scan.");
     return;
@@ -168,17 +225,21 @@ export async function startLiveBot() {
   addLog("🔌 Starting Baileys Live Connection...");
   botState.status = "connecting";
   botState.qrCode = "";
-  botState.reconnectCount = 0; // Reset reconnection attempts when manually starting
+  // Only a manual start (button / API) resets the reconnection budget.
+  // Reconnect-timer calls must NOT reset it, or the 5-attempt limit never triggers.
+  if (isManualStart) {
+    botState.reconnectCount = 0;
+  }
 
   try {
-    initRegistry();
-    
+    await initRegistry();
+
     // Auth state directory
     const { state, saveCreds } = await useMultiFileAuthState("nebula_auth_info");
     const { version } = await fetchLatestBaileysVersion();
-    
+
     addLog(`🌐 Connecting to WhatsApp using Web API version ${version.join(".")}`);
-    
+
     const sock = makeWASocket({
       version,
       auth: state,
@@ -190,9 +251,9 @@ export async function startLiveBot() {
     botState.socket = sock;
 
     // Listen to connection updates
-    sock.ev.on("connection.update", (update) => {
+    sock.ev.on("connection.update", (update: any) => {
       const { connection, lastDisconnect, qr } = update;
-      
+
       if (qr) {
         botState.status = "qr_ready";
         botState.qrCode = qr;
@@ -209,11 +270,12 @@ export async function startLiveBot() {
         botState.qrCode = "";
         botState.reconnectCount = 0;
         addLog("✅ Nebula Bot is officially CONNECTED to WhatsApp!");
-        
-        // Notify owner if number configured
+
+        // Notify owner if a valid number is configured (avoids messaging random placeholder numbers)
         const config = getConfig();
-        if (config.ownerNumber) {
-          const ownerJid = `${config.ownerNumber.replace(/[^0-9]/g, "")}@s.whatsapp.net`;
+        const ownerDigits = config.ownerNumber.replace(/[^0-9]/g, "");
+        if (ownerDigits.length >= 8) {
+          const ownerJid = `${ownerDigits}@s.whatsapp.net`;
           sock.sendMessage(ownerJid, { text: `🌌 *${config.botName}* is online and connected!\nPrefix: \`${config.prefix}\`` }).catch(() => {});
         }
       }
@@ -226,13 +288,13 @@ export async function startLiveBot() {
 
         botState.qrCode = "";
         const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
-        
+
         // If logged out or bad session, we must stop reconnection and clear directory to prevent "Stream Errored (conflict)" loops
         const isBadSession = statusCode === DisconnectReason.loggedOut || statusCode === DisconnectReason.badSession || statusCode === 403;
         const shouldReconnect = !isBadSession;
-        
+
         addLog(`❌ Connection closed. Reason: ${lastDisconnect?.error?.message || "unknown"} (Status Code: ${statusCode}). Reconnect: ${shouldReconnect}`);
-        
+
         botState.status = "disconnected";
         botState.socket = null;
 
@@ -263,14 +325,14 @@ export async function startLiveBot() {
             botState.reconnectCount++;
             addLog(`🔄 Attempting reconnect (${botState.reconnectCount}/5) in 5 seconds...`);
           }
-          
+
           if (botState.reconnectTimeout) {
             clearTimeout(botState.reconnectTimeout);
           }
-          
+
           // Mark this socket as superseded so future duplicate close events are discarded
           (sock as any).isClosedByEngine = true;
-          
+
           botState.reconnectTimeout = setTimeout(() => {
             botState.reconnectTimeout = null;
             startLiveBot();
@@ -283,10 +345,46 @@ export async function startLiveBot() {
 
     sock.ev.on("creds.update", saveCreds);
 
+    // Welcome / goodbye messages when members join or leave groups
+    sock.ev.on("group-participants.update", async (update: any) => {
+      const { id, participants, action } = update;
+      if (!id || !Array.isArray(participants) || !action) return;
+      if (action !== "add" && action !== "remove") return;
+
+      try {
+        const settings = database.getGroupSettings(id);
+        const enabled = action === "add" ? settings.welcome : settings.goodbye;
+        if (!enabled) return;
+
+        const metadata = await getCachedGroupMetadata(sock, id);
+        const groupName = metadata?.subject || "this group";
+
+        for (const participant of participants) {
+          const jid = typeof participant === "string" ? participant : participant?.id;
+          if (!jid || jid.endsWith("@g.us")) continue;
+          const number = jid.split("@")[0].replace(/[^0-9]/g, "");
+          if (!number) continue;
+
+          const template = action === "add" ? settings.welcomeMessage : settings.goodbyeMessage;
+          const message = template
+            .replace(/@user/g, `@${number}`)
+            .replace(/@group/g, groupName);
+
+          await sock.sendMessage(id, {
+            text: message,
+            mentions: [jid],
+          }).catch(() => {});
+          addLog(`👋 ${action === "add" ? "Welcome" : "Goodbye"} message sent to @${number} in ${id}`);
+        }
+      } catch (e: any) {
+        addLog(`⚠️ Failed to send ${action} message: ${e?.message || e}`);
+      }
+    });
+
     // Message handler with memory guards
-    sock.ev.on("messages.upsert", async (m) => {
+    sock.ev.on("messages.upsert", async (m: any) => {
       if (m.type !== "notify") return;
-      
+
       for (const msg of m.messages) {
         if (!msg.message) continue;
 
@@ -308,10 +406,10 @@ export async function startLiveBot() {
         if (!messageContent) continue;
 
         // Extract text from the unwrapped message
-        const text = messageContent.conversation || 
-                     messageContent.extendedTextMessage?.text || 
-                     messageContent.imageMessage?.caption || 
-                     messageContent.videoMessage?.caption || 
+        const text = messageContent.conversation ||
+                     messageContent.extendedTextMessage?.text ||
+                     messageContent.imageMessage?.caption ||
+                     messageContent.videoMessage?.caption ||
                      messageContent.templateButtonReplyMessage?.selectedId ||
                      messageContent.buttonsResponseMessage?.selectedButtonId ||
                      messageContent.listResponseMessage?.singleSelectReply?.selectedRowId ||
@@ -336,10 +434,11 @@ export async function startLiveBot() {
 
         // Active Group Moderation Engine
         const isGroup = senderJid.endsWith("@g.us");
+        let isSenderAdmin = false;
+        let isBotAdmin = false;
+
         if (isGroup && !isFromMe) {
           const settings = database.getGroupSettings(senderJid);
-          let isSenderAdmin = false;
-          let isBotAdmin = false;
 
           try {
             const groupMetadata = await getCachedGroupMetadata(sock, senderJid);
@@ -358,10 +457,10 @@ export async function startLiveBot() {
             const linkRegex = /chat.whatsapp.com\/([0-9A-Za-z]{20,24})/i;
             if (linkRegex.test(text)) {
               addLog(`🛡️ [Antilink] Link message detected from @${actualSenderNumber} in group ${senderJid}`);
-              
+
               if (isBotAdmin) {
                 await sock.sendMessage(senderJid, { delete: msg.key });
-                
+
                 if (settings.antilinkAction === "kick") {
                   await sock.groupParticipantsUpdate(senderJid, [actualSenderJid], "remove");
                   await sock.sendMessage(senderJid, {
@@ -385,10 +484,10 @@ export async function startLiveBot() {
             const mentionedJids = ctxInfo?.mentionedJid || [];
             if (mentionedJids.length >= 4) {
               addLog(`🛡️ [Antitag] Mass mention (${mentionedJids.length} tags) detected from @${actualSenderNumber}`);
-              
+
               if (isBotAdmin) {
                 await sock.sendMessage(senderJid, { delete: msg.key });
-                
+
                 if (settings.antitagAction === "kick") {
                   await sock.groupParticipantsUpdate(senderJid, [actualSenderJid], "remove");
                   await sock.sendMessage(senderJid, {
@@ -417,7 +516,7 @@ export async function startLiveBot() {
         const body = text.slice(prefix.length).trim();
         const args = body.split(/\s+/);
         const commandName = args.shift()?.toLowerCase() || "";
-        
+
         const command = getCommand(commandName);
         if (!command) {
           addLog(`⚠️ Unknown or dynamically excluded command: "${commandName}"`);
@@ -428,9 +527,20 @@ export async function startLiveBot() {
         const replyHandler = async (textStr: string, mediaUrl?: string) => {
           try {
             if (mediaUrl) {
-              return await sock.sendMessage(senderJid, { 
-                image: { url: mediaUrl }, 
-                caption: textStr 
+              // Decode data: URIs (e.g. AI-generated images) into a buffer —
+              // Baileys cannot fetch data URIs directly.
+              if (mediaUrl.startsWith("data:")) {
+                const buffer = bufferFromDataUri(mediaUrl);
+                if (buffer) {
+                  return await sock.sendMessage(senderJid, {
+                    image: buffer,
+                    caption: textStr
+                  }, { quoted: msg });
+                }
+              }
+              return await sock.sendMessage(senderJid, {
+                image: { url: mediaUrl },
+                caption: textStr
               }, { quoted: msg });
             } else {
               return await sock.sendMessage(senderJid, { text: textStr }, { quoted: msg });
@@ -450,25 +560,25 @@ export async function startLiveBot() {
           }
         };
 
-        // Sensible media handling - dynamic buffer downloader
+        // Sensible media handling - dynamic buffer downloader (operates on the unwrapped message)
         const mediaDownloader = async (): Promise<Buffer | null> => {
           try {
-            const messageType = Object.keys(msg.message!)[0];
+            const messageType = Object.keys(messageContent)[0];
             if (!["imageMessage", "videoMessage", "documentMessage", "audioMessage"].includes(messageType)) {
               return null;
             }
-            
+
             addLog(`Downloading media content of type: ${messageType}`);
             const stream = await (sock as any).downloadContentFromMessage(
-              msg.message![messageType as keyof typeof msg.message],
+              messageContent[messageType as keyof typeof messageContent],
               messageType.replace("Message", "")
             );
-            
+
             let buffer = Buffer.alloc(0);
             for await (const chunk of stream) {
               buffer = Buffer.concat([buffer, chunk]);
             }
-            
+
             // Log memory safe usage
             addLog(`Media download finished. Buffer size: ${Math.round(buffer.length / 1024)} KB.`);
             return buffer;
@@ -482,6 +592,7 @@ export async function startLiveBot() {
           sender: senderJid,
           senderName,
           isOwner,
+          isAdmin: isSenderAdmin,
           prefix,
           commandName,
           args,
@@ -492,7 +603,7 @@ export async function startLiveBot() {
         };
 
         addLog(`💬 Executing dynamic command: [${commandName}] for ${senderName} (${senderNumber})`);
-        
+
         try {
           incrementCommandStats(commandName);
           await command.execute(sock, msg, context);

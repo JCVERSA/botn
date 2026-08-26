@@ -1,4 +1,5 @@
 import { BotCommand } from "../types.js";
+import { isSafeDownloadUrl, safeFetch } from "../urlSafety.js";
 
 // List of public robust Cobalt instances for high-reliability fallback waterfall
 const COBALT_INSTANCES = [
@@ -71,8 +72,15 @@ const downloadCommand: BotCommand = {
       return context.reply("❌ *Error:* Please enter a valid URL starting with http:// or https://");
     }
 
+    // SSRF guard: never fetch private/internal/loopback destinations
+    if (!(await isSafeDownloadUrl(mediaUrl))) {
+      return context.reply(
+        "❌ *Error:* This URL is blocked for security reasons (private, internal, or non-http(s) destination)."
+      );
+    }
+
     await context.react("⏳");
-    const statusMsg = await context.reply(`✨ *Processing media request...*\n\n🔗 URL: ${mediaUrl}\n⚙️ Mode: ${audioOnly ? "🔊 Audio (MP3)" : `🎥 Video (${videoQuality}p)`}\n📡 Connecting to Nebula bypass tunnels...`);
+    await context.reply(`✨ *Processing media request...*\n\n🔗 URL: ${mediaUrl}\n⚙️ Mode: ${audioOnly ? "🔊 Audio (MP3)" : `🎥 Video (${videoQuality}p)`}\n📡 Connecting to Nebula bypass tunnels...`);
 
     // Payload for Cobalt API
     const payload = {
@@ -153,8 +161,8 @@ const downloadCommand: BotCommand = {
       if (downloadUrl) {
         console.log(`[Downloader] Downloading direct file from: ${downloadUrl}`);
         
-        // Fetch the file buffer
-        const fileRes = await fetch(downloadUrl);
+        // Fetch the file buffer (SSRF-safe: validates every redirect hop)
+        const fileRes = await safeFetch(downloadUrl);
         if (!fileRes.ok) throw new Error(`HTTP error! status: ${fileRes.status}`);
         
         const arrayBuffer = await fileRes.arrayBuffer();
@@ -193,7 +201,7 @@ const downloadCommand: BotCommand = {
         const limit = Math.min(pickerUrls.length, 3);
         for (let i = 0; i < limit; i++) {
           const itemUrl = pickerUrls[i];
-          const fileRes = await fetch(itemUrl);
+          const fileRes = await safeFetch(itemUrl);
           if (fileRes.ok) {
             const arrayBuffer = await fileRes.arrayBuffer();
             const fileBuffer = Buffer.from(arrayBuffer);

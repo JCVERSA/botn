@@ -43,6 +43,7 @@ const menuCommand: BotCommand = {
       menuText += `🔮 *GENERAL*\n`;
       menuText += ` ├ \`${config.prefix}menu\` - Show this help menu\n`;
       menuText += ` ├ \`${config.prefix}ping\` - Check speed & latency\n`;
+      menuText += ` ├ \`${config.prefix}help <command>\` - Detailed command help\n`;
       menuText += `🔮 *AI & CREATIVE*\n`;
       menuText += ` ├ \`${config.prefix}ai <prompt>\` - Ask Gemini AI\n`;
       menuText += ` ├ \`${config.prefix}image <prompt>\` - Generate AI image\n`;
@@ -50,8 +51,7 @@ const menuCommand: BotCommand = {
       menuText += ` ├ \`${config.prefix}joke\` - Get a random joke\n`;
       menuText += ` ├ \`${config.prefix}quote\` - Inspiring quotes\n`;
       menuText += `🔮 *OWNER*\n`;
-      menuText += ` ├ \`${config.prefix}restart\` - Restart the bot\n`;
-      menuText += ` ├ \`${config.prefix}setprefix <char>\` - Change Prefix\n`;
+      menuText += ` ├ \`${config.prefix}owner\` - Owner tools (prefix, name, image, channel)\n`;
     }
 
     menuText += `📢 *Official Channel:* ${config.newsletterUrl}\n`;

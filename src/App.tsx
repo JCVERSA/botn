@@ -7,22 +7,16 @@ import {
   Download,
   Code2,
   Send,
-  MessageSquare,
   Zap,
   RefreshCw,
   Sparkles,
   Save,
   Trash2,
-  ChevronRight,
-  ShieldAlert,
   CheckCircle,
   XCircle,
   AlertCircle,
-  User,
-  Phone,
   Globe,
   Check,
-  Image as ImageIcon,
   Play,
   Mic,
   Search,
@@ -30,8 +24,7 @@ import {
   X,
   BookOpen,
   HelpCircle,
-  Copy,
-  ExternalLink
+  Copy
 } from "lucide-react";
 
 import {
@@ -43,120 +36,15 @@ import {
   Legend
 } from "recharts";
 
-// Types
-interface BotConfig {
-  botName: string;
-  prefix: string;
-  botImage: string;
-  ownerNumber: string;
-  newsletterUrl: string;
-  newsletterName: string;
-}
-
-interface BotCommand {
-  name: string;
-  category: string;
-  description: string;
-  usage: string;
-  aliases?: string[];
-}
-
-interface ChatMessage {
-  id: string;
-  sender: "user" | "bot";
-  senderName: string;
-  text: string;
-  imageUrl?: string;
-  emoji?: string;
-  timestamp: string;
-  isAudio?: boolean;
-  audioDuration?: string;
-}
-
-const parseUsageAndParams = (usage: string, cmdName: string, prefix: string) => {
-  let cleanUsage = usage;
-  if (!usage.startsWith(prefix) && !usage.startsWith(".")) {
-    cleanUsage = `${prefix}${usage}`;
-  } else if (usage.startsWith(".")) {
-    cleanUsage = `${prefix}${usage.slice(1)}`;
-  }
-
-  const paramRegex = /([<\[])([^>\]]+)([>\]])/g;
-  const parameters: { name: string; required: boolean }[] = [];
-  let match;
-  while ((match = paramRegex.exec(usage)) !== null) {
-    parameters.push({
-      name: match[2],
-      required: match[1] === "<",
-    });
-  }
-
-  let example = cleanUsage;
-  if (cmdName === "download") {
-    example = `${prefix}download https://www.instagram.com/p/C_m68D7xv6Y/`;
-  } else if (cmdName === "ai") {
-    example = `${prefix}ai what is the speed of light?`;
-  } else if (cmdName === "image") {
-    example = `${prefix}image a futuristic city on Mars`;
-  } else if (cmdName === "weather") {
-    example = `${prefix}weather Paris`;
-  } else if (cmdName === "calc") {
-    example = `${prefix}calc 25 * 4 + 10`;
-  } else if (cmdName === "define") {
-    example = `${prefix}define serendipity`;
-  } else if (cmdName === "joke") {
-    example = `${prefix}joke`;
-  } else if (cmdName === "ping") {
-    example = `${prefix}ping`;
-  } else if (cmdName === "menu") {
-    example = `${prefix}menu`;
-  } else if (cmdName === "owner") {
-    example = `${prefix}owner`;
-  } else if (cmdName === "quote") {
-    example = `${prefix}quote`;
-  } else if (cmdName === "roast") {
-    example = `${prefix}roast @user`;
-  } else if (cmdName === "rps") {
-    example = `${prefix}rps rock`;
-  } else if (cmdName === "trivia") {
-    example = `${prefix}trivia`;
-  } else if (cmdName === "truth") {
-    example = `${prefix}truth`;
-  } else if (cmdName === "dare") {
-    example = `${prefix}dare`;
-  } else if (cmdName === "waifu") {
-    example = `${prefix}waifu`;
-  } else if (cmdName === "hidetag") {
-    example = `${prefix}hidetag Hello everyone!`;
-  } else if (cmdName === "antilink") {
-    example = `${prefix}antilink on`;
-  } else if (cmdName === "antitag") {
-    example = `${prefix}antitag on`;
-  } else if (cmdName === "help") {
-    example = `${prefix}help download`;
-  } else {
-    let genericEx = cleanUsage;
-    parameters.forEach((param) => {
-      const placeholder = param.required ? `<${param.name}>` : `[${param.name}]`;
-      const sample = param.name.toLowerCase().includes("url") 
-        ? "https://example.com" 
-        : param.name.toLowerCase().includes("name") || param.name.toLowerCase().includes("user")
-        ? "Alice"
-        : "test";
-      genericEx = genericEx.replace(placeholder, sample);
-    });
-    example = genericEx;
-  }
-
-  return { cleanUsage, parameters, example };
-};
+import { BotConfig, BotCommand, ChatMessage, ConnectionStatus } from "./lib/types";
+import { formatMessageLine, parseUsageAndParams } from "./lib/format";
 
 export default function App() {
   // Tab states
   const [activeTab, setActiveTab] = useState<"control" | "commands" | "logs" | "export" | "analytics" | "documentation">("control");
 
   // Bot states fetched from server
-  const [status, setStatus] = useState<"disconnected" | "connecting" | "qr_ready" | "connected" | "error">("disconnected");
+  const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [qrUrl, setQrUrl] = useState<string | null>(null);
   const [logs, setLogs] = useState<string[]>([]);
   const [commands, setCommands] = useState<BotCommand[]>([]);
@@ -164,7 +52,7 @@ export default function App() {
     botName: "Nebula Bot",
     prefix: ".",
     botImage: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?auto=format&fit=crop&w=600&q=80",
-    ownerNumber: "1234567890",
+    ownerNumber: "",
     newsletterUrl: "https://whatsapp.com/channel/0029VaNebulaChannel",
     newsletterName: "Nebula Bot Official News",
   });
@@ -179,7 +67,6 @@ export default function App() {
     quote: 5,
     owner: 3
   });
-  const [isFetchingAnalytics, setIsFetchingAnalytics] = useState(false);
 
   // Documentation Tab states
   const [docSearchQuery, setDocSearchQuery] = useState("");
@@ -197,7 +84,6 @@ export default function App() {
   const [voiceReplyText, setVoiceReplyText] = useState("");
   const [isVoiceResponding, setIsVoiceResponding] = useState(false);
   const [isVoiceRecording, setIsVoiceRecording] = useState(false);
-  const [voiceAudioUrl, setVoiceAudioUrl] = useState<string | null>(null);
   const [isPlayingVoice, setIsPlayingVoice] = useState(false);
 
   // MediaRecorder refs
@@ -357,7 +243,6 @@ export default function App() {
     if (!textPrompt.trim()) return;
     setIsVoiceResponding(true);
     setVoiceReplyText("");
-    setVoiceAudioUrl(null);
     setIsPlayingVoice(false);
 
     try {
@@ -371,7 +256,6 @@ export default function App() {
         setVoiceReplyText(data.text);
         if (data.audioBase64) {
           const rawAudioUrl = `data:audio/mp3;base64,${data.audioBase64}`;
-          setVoiceAudioUrl(rawAudioUrl);
           
           // Play automatically
           setTimeout(() => {
@@ -524,11 +408,16 @@ export default function App() {
         body: JSON.stringify(formConfig),
       });
       const data = await res.json();
+      if (!res.ok) {
+        addSystemLog(`ERROR: Config not saved: ${data.error || res.status}`);
+        return;
+      }
       setConfig(data);
       setFormConfig(data);
       // Notify simulator about change if profile info changed
       addSystemLog("SYSTEM: Config updated successfully.");
     } catch (e) {
+      addSystemLog("ERROR: Could not reach server to save config.");
     } finally {
       setIsSavingConfig(false);
     }
@@ -558,11 +447,15 @@ export default function App() {
           code: commandCode,
         }),
       });
+      const data = await res.json();
       if (res.ok) {
-        addSystemLog(`SUCCESS: Command ${selectedCommand.name} updated.`);
+        addSystemLog(`SUCCESS: ${data.message || `Command ${selectedCommand.name} saved.`}`);
         fetchCommands();
+      } else {
+        addSystemLog(`ERROR: ${data.error || "Failed to save command."}`);
       }
     } catch (e) {
+      addSystemLog("ERROR: Could not reach server to save command.");
     } finally {
       setIsSavingCode(false);
     }
@@ -799,7 +692,7 @@ export default function App() {
           <div>
             <h1 className="text-xl font-bold tracking-tight text-slate-900 flex items-center gap-2">
               {config.botName}
-              <span className="text-xs font-normal text-slate-400">v1.1 Multi-Device</span>
+              <span className="text-xs font-normal text-slate-400">v1.1.0 Multi-Device</span>
             </h1>
             <p className="text-xs text-slate-500">Lightweight, modular, customizable WhatsApp controller</p>
           </div>
@@ -1931,14 +1824,9 @@ export default function App() {
                   ) : (
                     <div className="whitespace-pre-wrap select-text break-words">
                       {msg.text.split("\n").map((line, i) => {
-                        // Basic parsing for *bold* and _italic_ markup used in WhatsApp
-                        let formatted = line;
-                        // Bold replacements
-                        formatted = formatted.replace(/\*(.*?)\*/g, "<strong>$1</strong>");
-                        // Italic replacements
-                        formatted = formatted.replace(/_(.*?)_/g, "<em>$1</em>");
-                        // Monospace replacements
-                        formatted = formatted.replace(/`(.*?)`/g, "<code class='bg-slate-100 px-1 py-0.5 rounded text-[10px] font-mono'>$1</code>");
+                        // XSS-safe formatting: content is HTML-escaped first,
+                        // then WhatsApp-style *bold*, _italic_ and `code` markup is applied.
+                        const formatted = formatMessageLine(line);
 
                         return (
                           <p key={i} dangerouslySetInnerHTML={{ __html: formatted }} className={i > 0 ? "mt-1" : ""} />

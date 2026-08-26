@@ -17,6 +17,10 @@ export default defineConfig(() => {
       hmr: process.env.DISABLE_HMR !== 'true',
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
+      // Allow the app to be served from arbitrary hosts (AI Studio / sandbox preview
+      // domains, custom Cloud Run domains). Dev middleware only; production serves
+      // static files via Express and is unaffected.
+      allowedHosts: true as true,
     },
   };
 });
