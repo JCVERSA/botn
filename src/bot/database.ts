@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-const DB_DIR = path.join(process.cwd(), "database");
+const DB_DIR = process.env.NEBULA_DATA_DIR || path.join(process.cwd(), "database");
 
 // Core group settings schema
 export interface GroupSettings {

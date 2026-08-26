@@ -2,6 +2,8 @@ export interface BotCommandContext {
   sender: string;
   senderName: string;
   isOwner: boolean;
+  /** True when the sender is a group admin (always false outside groups). */
+  isAdmin: boolean;
   prefix: string;
   commandName: string;
   args: string[];

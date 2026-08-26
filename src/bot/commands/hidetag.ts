@@ -1,4 +1,4 @@
-import { BotCommand, BotCommandContext } from "../types.js";
+import { BotCommand } from "../types.js";
 
 const hidetag: BotCommand = {
   name: "hidetag",
@@ -8,6 +8,10 @@ const hidetag: BotCommand = {
   execute: async (sock, msg, context) => {
     if (!context.sender.endsWith("@g.us")) {
       return context.reply("❌ *Error:* This command can only be used in group chats.");
+    }
+
+    if (!context.isAdmin && !context.isOwner) {
+      return context.reply("⚠️ *Access Denied:* Only group administrators can tag all members.");
     }
 
     try {

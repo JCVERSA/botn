@@ -11,6 +11,10 @@ const antitag: BotCommand = {
       return context.reply("❌ *Error:* This command can only be used in group chats.");
     }
 
+    if (!context.isAdmin && !context.isOwner) {
+      return context.reply("⚠️ *Access Denied:* Only group administrators can configure antitag protection.");
+    }
+
     try {
       const args = context.args;
       const settings = database.getGroupSettings(context.sender);
